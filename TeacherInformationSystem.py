@@ -193,22 +193,29 @@ class teacher():
 
     '''
     修改教师的基本信息
+    input:
+        cookie: 用户cookie
+        information_dict: 教师基本信息字典，包含name, department, phone, email, office, introduction
+    output:
+        如果修改成功，返回True，否则返回False
     '''
     def setInformation(self,cookie, information_dict):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
         result = self.c.fetchone()
         if result is None:
-            return None
+            return False
         role = result[1]
         if role != 2:
-            return None
+            return False
         teacher_uuid = result[0]
         self.c.execute("UPDATE teacher SET name = ?, department = ?, phone = ?, email = ?, office = ?, introduction = ? WHERE uuid = ?", (information_dict['name'], information_dict['department'], information_dict['phone'], information_dict['email'], information_dict['office'], information_dict['introduction'], teacher_uuid))
         self.conn.commit()
-        
+        return True
     '''
-    获取教师的空闲时间段
-    result: 查询结果，如果查询成功，返回查询结果，否则返回None
+    获取本教师的空闲时间段
+    input: 
+        cookie: 用户cookie(教师)
+    result: 返回该教师的所有空闲时间段
     '''
     def getFreeTime(self, cookie):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
@@ -225,26 +232,33 @@ class teacher():
         return result
     '''
     设置教师的空闲时间段
-    start_time: 开始时间列表
-    end_time: 结束时间列表
-    例子：start_time = ['8:00', '10:00'], end_time = ['9:00', '11:00']
-    标识8:00-9:00和10:00-11:00两个时间段是空闲的
+    input:
+        cookie: 用户cookie
+        start_time: 开始时间列表
+        end_time: 结束时间列表
+        例子：start_time = ['8:00', '10:00'], end_time = ['9:00', '11:00']
+        标识8:00-9:00和10:00-11:00两个时间段是空闲的
+    output:
+        如果设置成功，返回True，否则返回False
     '''
     def setFreeTime(self,cookie,start_time, end_time):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
         result = self.c.fetchone()
         if result is None:
-            return None
+            return False
         if result[2] != 2:
-            return None
+            return False
         teacher_uuid = result[0]
         for i in range(len(start_time)):
-            self.c.execute("UPDATE teacher_time SET start_time = ?, end_time = ? WHERE teacher_uuid = ?", (start_time[i], end_time[i], teacher_uuid))
+            self.c.execute("INSERT INTO teacher_time (teacher_uuid, start_time, end_time) VALUES (?, ?, ?)", (teacher_uuid, start_time[i], end_time[i]))
         self.conn.commit()
-
+        return True
     '''
     获取教师的预约信息
-    result: 查询结果，如果查询成功，返回查询结果，否则返回None
+    input:
+        cookie: 用户cookie(教师)
+    output:
+        返回从数据库中查找到所有的与该教师有关的预约信息
     '''
     def getAppointment(self, cookie):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
@@ -263,7 +277,9 @@ class teacher():
 
     '''
     接受学生的预约
-    student_uuid: 学生uuid
+    cookie: 用户cookie
+    appointnumber: 预约编号
+    exception: 备注信息
     status: 0/1/2 0:待审核 1:已接受 2:已拒绝
     '''
     def acceptAppointment(self, cookie, appointnumber, exception):
@@ -282,6 +298,9 @@ class teacher():
         self.conn.commit()
     '''
     拒绝预约
+    cookie: 用户cookie
+    appointnumber: 预约编号
+    exception: 备注信息
     '''
     def denyAppointment(self, cookie, appointnumber, exception):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
@@ -304,6 +323,7 @@ class student():
         self.c = self.conn.cursor()
     '''
     获取学生的基本信息
+    cookie: cookie字段
     result: 查询结果，如果查询成功，返回查询结果，否则返回None
     '''
     def getInformation(self, cookie):
@@ -355,6 +375,9 @@ class student():
         return result
     '''
     取消预约
+    input:
+        cookie: 用户cookie
+        number: 预约编号
     '''
     def cancelAppointment(self, cookie, number):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
@@ -367,5 +390,75 @@ class student():
         if result is None:
             return False
         self.c.execute("UPDATE appointment SET status = 3 WHERE number = ? AND student_uuid = ?", (number, student_uuid))
+        self.conn.commit()
+        return True
+    
+    '''
+    获取教师的空闲时间段
+    input: 
+        teacher_username: 教师用户名
+    output: 
+        查询结果，如果查询成功，返回查询结果，否则返回None
+    '''
+    def getFreeTime(self, teacher_username):
+        self.c.execute("SELECT uuid FROM user WHERE username = ?", (teacher_username,))
+        result = self.c.fetchone()
+        if result is None:
+            return None
+        teacher_uuid = result[0]
+        self.c.execute("SELECT * FROM teacher_time WHERE teacher_uuid = ?", (teacher_uuid,))
+        result = self.c.fetchall()
+        if result is None:
+            return None
+        return result
+    
+    '''
+    查询教师的预约信息
+    input: 
+        teacher_username: 教师用户名
+    output: 
+        查询结果，如果查询成功，返回查询结果，否则返回None
+    '''
+    def getTeacherAppointment(self, teacher_username):
+        self.c.execute("SELECT uuid FROM user WHERE username = ?", (teacher_username,))
+        result = self.c.fetchone()
+        if result is None:
+            return None
+        teacher_uuid = result[0]
+        self.c.execute("SELECT * FROM appointment WHERE teacher_uuid = ?", (teacher_uuid,))
+        result = self.c.fetchall()
+        if result is None:
+            return None
+        return result
+
+    '''
+    查询所有教师的信息
+    output: 
+        对teacher表的查询结果
+    '''
+    def getAllTeacher(self):
+        #对teacher表和user表进行联合查询,返回username, name, department, phone, email, office, introduction
+        self.c.execute("SELECT user.username, teacher.name, teacher.department, teacher.phone, teacher.email, teacher.office, teacher.introduction FROM user, teacher WHERE user.uuid = teacher.uuid")
+        result = self.c.fetchall()
+        return result
+    '''
+    申请预约
+    cookie: 用户cookie
+    teacher_username: 教师用户名
+    start_time: 开始时间
+    end_time: 结束时间
+    '''
+    def makeAppointment(self, cookie, teacher_username, start_time, end_time):
+        self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        student_uuid = result[0]
+        self.c.execute("SELECT uuid FROM user WHERE username = ?", (teacher_username,))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        teacher_uuid = result[0]
+        self.c.execute("INSERT INTO appointment (student_uuid, teacher_uuid, start_time, end_time, status, application_time) VALUES (?, ?, ?, ?, 0, datetime('now'))", (student_uuid, teacher_uuid, start_time, end_time))
         self.conn.commit()
         return True
