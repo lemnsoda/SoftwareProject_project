@@ -32,12 +32,14 @@ teacher_time表：存储教师空闲时间段
     String start_time //默认为8:00
     String end_time //默认为20:00
 appointment表：存储预约信息
+    int number(主键) //预约编号
     int student_uuid(外键)
     int teacher_uuid(外键)
     String start_time
     String end_time
     String application_time //申请时间
-    int status 0/1/2 0:待审核 1:已接受 2:已拒绝
+    int status 0/1/2 0:待审核 1:已接受 2:已拒绝 3:已取消
+    String exception //备注
 cookie表：存储uuid对应的cooike字段
     int uuid(主键)
     string cookie
@@ -71,11 +73,17 @@ def initDB():
            start_time TEXT NOT NULL,
            end_time TEXT NOT NULL);''')
     c.execute('''CREATE TABLE appointment
-           (student_uuid INTEGER NOT NULL,
+           (number INTEGER PRIMARY KEY AUTOINCREMENT,
+           student_uuid INTEGER NOT NULL,
            teacher_uuid INTEGER NOT NULL,
            start_time TEXT NOT NULL,
            end_time TEXT NOT NULL,
-           status INTEGER NOT NULL);''')
+           status INTEGER NOT NULL,
+           exception TEXT);''')
+    c.execute('''CREATE TABLE cookie
+           (uuid INTEGER PRIMARY KEY,
+           cookie TEXT NOT NULL,
+           role INTEGER NOT NULL);''')
     conn.commit()
     conn.close()
 
@@ -132,7 +140,12 @@ class admin():
             return None
         uuid = result[0]
         cookie = admin.generateCookie()
-        c.execute("INSERT INTO cookie (uuid, cookie, role) VALUES (?, ?, ?)", (uuid, cookie, result[3]))
+        c.execute("SELECT * FROM cookie WHERE uuid = ?", (uuid,))
+        result = c.fetchone()
+        if result == None:
+            c.execute("INSERT INTO cookie (uuid, cookie, role) VALUES (?, ?, ?)", (uuid, cookie, result[3]))
+        else:
+            c.execute("UPDATE cookie SET cookie = ? WHERE uuid = ?", (cookie, uuid))
         conn.commit()
         conn.close()
         return cookie + str(result[3])
@@ -249,17 +262,110 @@ class teacher():
         return result
 
     '''
-    接受或拒绝学生的预约
+    接受学生的预约
     student_uuid: 学生uuid
     status: 0/1/2 0:待审核 1:已接受 2:已拒绝
     '''
-    def dealAppointment(self, cookie, student_uuid, status):
+    def acceptAppointment(self, cookie, appointnumber, exception):
+        self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        if result[2] != 2:
+            return None
+        teacher_uuid = result[0]
+        self.c.execute("SELECT * FROM appointment WHERE number = ? AND teacher_uuid = ?", (appointnumber, teacher_uuid))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        self.execute("UPDATE appointment SET status = 1, exception = ? WHERE number = ? AND teacher_uuid = ?", (exception, appointnumber, teacher_uuid))
+        self.conn.commit()
+    '''
+    拒绝预约
+    '''
+    def denyAppointment(self, cookie, appointnumber, exception):
+        self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        if result[2] != 2:
+            return None
+        teacher_uuid = result[0]
+        self.c.execute("SELECT * FROM appointment WHERE number = ? AND teacher_uuid = ?", (appointnumber, teacher_uuid))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        self.c.execute("UPDATE appointment SET status = 2,exception = ? WHERE number = ? AND teacher_uuid = ?", (exception,appointnumber, teacher_uuid))
+        self.conn.commit()
+
+class student():
+    def __init__(self):
+        self.conn = sqlite3.connect('TeacherInformationSystem.db')
+        self.c = self.conn.cursor()
+    '''
+    获取学生的基本信息
+    result: 查询结果，如果查询成功，返回查询结果，否则返回None
+    '''
+    def getInformation(self, cookie):
         self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
         result = self.c.fetchone()
         if result is None:
             return None
-        if result[2] != 2:
+        if result[2] != 1:
             return None
-        teacher_uuid = result[0]
-        self.c.execute("UPDATE appointment SET status = ? WHERE student_uuid = ? AND teacher_uuid = ?", (status, student_uuid, teacher_uuid))
+        student_uuid = result[0]
+        self.c.execute("SELECT * FROM student WHERE uuid = ?", (student_uuid,))
+        result = self.c.fetchone()
+        if result is None:
+            return None
+        return result
+
+    '''
+    修改学生基本信息
+    cookie: cookie字段
+    information_dict: 学生基本信息字典，包含name, department, phone, email
+    '''
+    def setInformation(self,cookie, information_dict):
+        self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        role = result[1]
+        if role != 1:
+            return False
+        student_uuid = result[0]
+        self.c.execute("UPDATE student SET name = ?, department = ?, phone = ?, email = ? WHERE uuid = ?", (information_dict['name'], information_dict['department'], information_dict['phone'], information_dict['email'], student_uuid))
         self.conn.commit()
+        return True
+        
+    '''
+    获取学生的预约信息
+    result: 查询结果，如果查询成功，返回查询结果，否则返回None
+    '''
+    def getAppointment(self, cookie):
+        self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
+        result = self.c.fetchone()
+        if result is None:
+            return None
+        student_uuid = result[0]
+        self.c.execute("SELECT * FROM appointment WHERE student_uuid = ?", (student_uuid,))
+        result = self.c.fetchall()
+        if result is None:
+            return None
+        return result
+    '''
+    取消预约
+    '''
+    def cancelAppointment(self, cookie, number):
+        self.c.execute("SELECT uuid FROM cookie WHERE cookie = ?", (cookie,))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        student_uuid = result[0]
+        self.c.execute("SELECT * FROM appointment WHERE number = ? AND student_uuid = ?", (number, student_uuid))
+        result = self.c.fetchone()
+        if result is None:
+            return False
+        self.c.execute("UPDATE appointment SET status = 3 WHERE number = ? AND student_uuid = ?", (number, student_uuid))
+        self.conn.commit()
+        return True
